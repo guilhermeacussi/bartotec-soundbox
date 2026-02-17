@@ -1,63 +1,49 @@
 <?php
-
-header("Content-Type: application/json; charset=UTF-8");
+header("Content-Type: application/json");
 header("Access-Control-Allow-Origin: *");
 
-require_once "../config/database.php";
+$artist = $_GET['artist'] ?? "";
+$song   = $_GET['song'] ?? "";
 
-try {
-
-    // 🔎 Se existir busca por nome (?search=)
-    if (isset($_GET['search'])) {
-        $search = "%" . $_GET['search'] . "%";
-
-        $stmt = $pdo->prepare("
-            SELECT 
-                songs.id,
-                songs.name,
-                artists.name AS artist,
-                albums.name AS album,
-                songs.release_year
-            FROM songs
-            INNER JOIN artists ON songs.artist_id = artists.id
-            LEFT JOIN albums ON songs.album_id = albums.id
-            WHERE songs.name LIKE :search
-            ORDER BY songs.name ASC
-        ");
-
-        $stmt->bindParam(":search", $search);
-        $stmt->execute();
-    } 
-    // 🎵 Se não tiver busca → lista tudo
-    else {
-
-        $stmt = $pdo->query("
-            SELECT 
-                songs.id,
-                songs.name,
-                artists.name AS artist,
-                albums.name AS album,
-                songs.release_year
-            FROM songs
-            INNER JOIN artists ON songs.artist_id = artists.id
-            LEFT JOIN albums ON songs.album_id = albums.id
-            ORDER BY songs.name ASC
-        ");
-    }
-
-    $songs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode([
-        "success" => true,
-        "data" => $songs
-    ]);
-
-} catch (PDOException $e) {
-
-    http_response_code(500);
-
+if (!$artist || !$song) {
+    http_response_code(400);
     echo json_encode([
         "success" => false,
-        "error" => $e->getMessage()
+        "error" => "Parâmetros 'artist' e 'song' são obrigatórios."
     ]);
+    exit;
 }
+
+$artistEncoded = urlencode($artist);
+$songEncoded   = urlencode($song);
+
+$url = "https://musicbrainz.org/ws/2/recording/?query=recording:{$songEncoded}%20AND%20artist:{$artistEncoded}&fmt=json";
+
+$response = file_get_contents($url);
+
+if ($response === FALSE) {
+    echo json_encode([
+        "success" => false,
+        "error" => "Erro ao conectar com MusicBrainz."
+    ]);
+    exit;
+}
+
+$data = json_decode($response, true);
+
+if (empty($data['recordings'])) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Música não encontrada."
+    ]);
+    exit;
+}
+
+$record = $data['recordings'][0];
+
+echo json_encode([
+    "success" => true,
+    "song" => $record['title'] ?? null,
+    "artist" => $record['artist-credit'][0]['name'] ?? null,
+    "release_date" => $record['first-release-date'] ?? null
+]);
